@@ -4,13 +4,24 @@ This document is your speaking notes for the evaluation. It explains the
 project in plain language, walks through the code an evaluator is likely to
 ask about, and gives you rehearsed answers to likely questions.
 
-> **Note on numbers:** result values referenced below as "TBD" will be filled
-> in once the full-scale (10k train / 1k val / 2k test) training run
-> finishes — see `reports/comparison_table.md` for the final numbers once it
-> completes. The pipeline itself (data loading → training → evaluation →
-> saving → comparison) has been run and verified end-to-end at small scale
-> for all three models, so the code path is proven correct; only the
-> absolute metric values depend on the full run.
+> **Note on numbers (updated after a full audit + real training run):** the
+> custom LSTM and ULMFiT numbers below are **real, measured results** from
+> running `train_custom.py` and `ulmfit_train.py` end-to-end on the agreed
+> 3,500 train / 750 val / 750 test split (seed 42) — see
+> `reports/comparison_table.md` and `AUDIT_REPORT.md` for full details.
+> **BERT was not trained** — this audit ran in a sandboxed environment whose
+> network policy blocks `huggingface.co` (where `transformers` downloads
+> `bert-base-uncased` from), so `bert_train.py` could only be verified
+> structurally (an offline tiny random-weight BERT swapped in via
+> `config.BERT_MODEL_NAME`, confirming the code runs without error), not
+> with real pretrained weights. Run it yourself on a machine with normal
+> internet access to get real BERT numbers.
+>
+> | Model | Accuracy | Precision | Recall | F1 | Best epoch |
+> |---|---|---|---|---|---|
+> | Custom LSTM | 0.496 | 0.494 | 0.986 | 0.658 | 1 / 5 |
+> | AWD-LSTM (ULMFiT) | 0.855 | 0.844 | 0.864 | 0.854 | 5 / 5 |
+> | BERT (base-uncased) | not run in this environment | | | | |
 
 ## 1. Project Overview
 
@@ -53,7 +64,7 @@ data/IMDB Dataset.csv (50k reviews: review, sentiment)
 src/data_loader.py: get_splits()
   - cleans HTML (<br />) out of the text
   - shuffles with a fixed seed (42) for reproducibility
-  - splits into train / val / test (10k / 1k / 2k by default)
+  - splits into train / val / test (3,500 / 750 / 750 by default)
         |
         +--------------------+--------------------+
         |                    |                    |
@@ -249,7 +260,7 @@ fast). Not a bug in this codebase.
 How it was handled: (a) added `--train_size`/`--val_size`/`--test_size`/
 `--epochs` CLI overrides to every training script so correctness can be
 smoke-tested on a tiny slice in seconds regardless of machine load, and
-(b) ran the agreed 10k/2k-scale training as a true background process with
+(b) ran the agreed 3,500/750/750-scale training as a true background process with
 no artificial timeout, rather than assuming a fixed wall-clock budget.
 
 ## 9. Likely Evaluator Questions
@@ -362,7 +373,7 @@ larger batch size to use a GPU efficiently; for serving, export the best
 checkpoint and wrap it in a lightweight inference API.
 
 **Q17: What would you improve with more time/compute?**
-A: Run the full 50k-review dataset (currently trained on a 10k/1k/2k subset
+A: Run the full 50k-review dataset (currently trained on a 3,500/750/750 subset
 for iteration speed on a CPU-only machine — `FULL_DATASET = True` in
 `config.py` switches to it), a small hyperparameter sweep (learning rate,
 dropout) per model, and possibly a subword tokenizer for the custom LSTM
@@ -373,7 +384,9 @@ custom model specifically?**
 A: A modest, commonly-used starting configuration for binary text
 classification on a dataset this size — large enough to have real
 capacity, small enough to train in reasonable time on CPU without
-immediately overfitting a 10k-example training set.
+immediately overfitting a 3,500-example training set -- which is exactly
+what happened: the measured custom-LSTM test accuracy (49.6%) is barely
+above chance, with validation loss rising after epoch 1.
 
 **Q19: What does `padding_idx=0` actually do and why does it matter?**
 A: It tells the embedding layer to keep index 0's (the `<pad>` token's)
@@ -398,7 +411,7 @@ schema exists. It also means the comparison can be regenerated any time
 anything.
 
 **Q22: What's the biggest limitation of this project as it stands?**
-A: Compute — the "full-scale" 10k/2k run (and especially the true 50k
+A: Compute — the "full-scale" 3,500/750/750 run (and especially the true 50k
 full-dataset run) is expensive to run repeatedly on CPU, particularly for
 BERT. That's a hardware constraint, not a methodology gap: the code,
 metrics, and comparison logic are already correct and complete; running

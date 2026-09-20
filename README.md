@@ -25,6 +25,8 @@ src/
   bert_train.py               # fine-tunes bert-base-uncased, saves model + results
   evaluate.py                  # shared sklearn-metrics evaluation helper
   compare.py                    # builds the comparison table + plots from all results
+  eda.py                         # dataset EDA: label balance, review-length distribution, top words
+  predict.py                      # load a saved model + vocab and predict sentiment for new text
 models/                    # saved model checkpoints (created on first run)
 reports/                   # per-model results JSON + comparison table/plots (created on first run)
 main.py                    # CLI entry point
@@ -72,11 +74,12 @@ python -m src.train_custom --train_size 500 --val_size 100 --test_size 100 --epo
 
 `src/data_loader.get_splits()` is the single source of truth for the train/
 val/test split (fixed seed = 42), used identically by all three model
-scripts. By default (`FULL_DATASET = False` in `config.py`) it samples
-**10,000 train / 1,000 val / 2,000 test** reviews out of the 50,000 available
-— sized for iterating on a CPU-only machine. Set `FULL_DATASET = True` to use
-an 70/10/20 split over the full 50k reviews instead (recommended on a GPU —
-BERT fine-tuning in particular is expensive on CPU).
+scripts. By default (`FULL_DATASET = False` in `config.py`, `MAX_SAMPLES =
+5000`) it samples **3,500 train / 750 val / 750 test** reviews (a 70/15/15
+split of 5,000) out of the ~49,582 available after deduplication — sized
+for iterating on a CPU-only machine. Set `FULL_DATASET = True` to use a
+70/10/20 split over the full deduplicated dataset instead (recommended on a
+GPU — BERT fine-tuning in particular is expensive on CPU).
 
 - **train**: gradient updates
 - **val**: per-epoch loss/accuracy tracking (checkpoint selection is based on
@@ -100,3 +103,31 @@ don't exist yet) and writes:
   best epoch, training time
 - `reports/loss_curves.png` — train/val loss per epoch, all models overlaid
 - `reports/metrics_comparison.png` — bar chart of test-set metrics
+
+### Verified results (3,500 train / 750 val / 750 test, seed 42)
+
+Measured by actually running `train_custom.py` and `ulmfit_train.py` end to
+end (see `AUDIT_REPORT.md` for full methodology notes):
+
+| Model | Accuracy | Precision | Recall | F1 | Best epoch | Training time |
+|---|---|---|---|---|---|---|
+| Custom LSTM | 0.496 | 0.494 | 0.986 | 0.658 | 1 / 5 | ~27 min |
+| AWD-LSTM (ULMFiT) | 0.855 | 0.844 | 0.864 | 0.854 | 5 / 5 | ~26 min |
+| BERT (base-uncased) | not run | — | — | — | — | — |
+
+The custom LSTM barely beats chance and overfits almost immediately (val
+loss rises every epoch after epoch 1, while train loss keeps falling) —
+3,500 examples is not enough to learn useful word representations from
+scratch. ULMFiT, starting from AWD-LSTM weights pretrained on WikiText-103,
+reaches 85.5% test accuracy with smoothly decreasing train *and* val loss.
+This is the effect the project is designed to demonstrate: transfer
+learning's advantage is largest precisely when labeled data is scarce.
+
+**BERT was not trained in the sandboxed environment this audit ran in** —
+its network policy blocks `huggingface.co`, which `bert_train.py` needs to
+download `bert-base-uncased`. The code path was verified structurally
+(swapped in a tiny offline random-weight BERT and confirmed the full
+train/eval/checkpoint/save loop runs without error) but not with real
+weights. Run `python -m src.bert_train --train_size 3500 --val_size 750
+--test_size 750` on a machine with normal internet access to get real BERT
+numbers, then re-run `python -m src.compare`.
