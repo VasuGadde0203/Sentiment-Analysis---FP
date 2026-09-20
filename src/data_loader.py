@@ -16,7 +16,11 @@ def _load_raw_dataframe() -> pd.DataFrame:
     df = pd.read_csv(DATA_CSV_PATH)
     df["text"] = df["review"].astype(str).apply(clean_text)
     df["label"] = (df["sentiment"] == "positive").astype(int)
-    return df[["text", "label"]]
+    df = df[["text", "label"]]
+    # The Kaggle IMDB CSV has ~418 exact-duplicate reviews (some scraped
+    # twice). Left in, a duplicate can land in both train and test after the
+    # split below, leaking a memorized example into the held-out set.
+    return df.drop_duplicates(subset=["text"]).reset_index(drop=True)
 
 
 def get_splits(
